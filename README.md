@@ -1,4 +1,4 @@
-# Topic-Constrained Chatbot with Layered AI Guardrails
+# IFB220_Chatbot_Guardrails
 
 A multi-turn command-line chatbot that will **only** discuss one configured
 topic (gardening by default) and refuses everything else. It does not rely on
