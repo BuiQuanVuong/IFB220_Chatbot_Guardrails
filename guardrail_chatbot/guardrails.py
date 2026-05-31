@@ -80,15 +80,13 @@ class GuardrailEngine:
         self.logger = logger
         self.judge_fn = judge_fn
 
-        # Topic-independent anchor sets (don't change when topic changes).
+        # Anchors
         self.injection = AnchorSet("injection", config.INJECTION_EXEMPLARS, embedder)
         self.unsafe = AnchorSet("unsafe", config.UNSAFE_ANCHORS, embedder)
         self.benign = AnchorSet("benign", config.BENIGN_EXEMPLARS, embedder)
         self._regexes = [re.compile(p, re.IGNORECASE) for p in config.INJECTION_REGEXES]
 
         # Topic-dependent state: positive/negative anchors and system prompt.
-        # Set via set_topic so the same code path runs at startup and on
-        # /change_topic at runtime.
         self.topic: config.TopicConfig
         self.positive: AnchorSet
         self.negative: AnchorSet
@@ -107,16 +105,16 @@ class GuardrailEngine:
         self.negative = AnchorSet("off_topic", topic.negative_anchors, self.embedder)
         self.system_prompt = build_system_prompt(topic)
 
-    # ---- Layer 1: regex injection pre-filter -----------------------------
+    # Layer 1: regex injection pre-filter
     def _regex_injection_hit(self, text: str) -> str | None:
         for rx in self._regexes:
             if rx.search(text):
                 return rx.pattern
         return None
 
-    # ---- Public: input pipeline ------------------------------------------
+    # Public: input pipeline
     def check_input(self, text: str) -> Verdict:
-        # Layer 1 -- regex (no API call)
+        # Layer 1 - regex (no API call)
         hit = self._regex_injection_hit(text)
         if hit:
             v = Verdict(False, "regex_injection",
@@ -126,14 +124,11 @@ class GuardrailEngine:
             self._log(v, text)
             return v
 
-        # All remaining layers need the input embedding -- compute once.
+        # All remaining layers need the input embedding - compute once.
         vec = self.embedder.embed_one(text)
-        # Benign baseline: how similar is this to ordinary, harmless requests?
-        # Used as the contrastive reference for Layers 2 and 3 to cancel out
-        # ada-002's high anisotropic baseline similarity.
         benign = self.benign.max_similarity(vec)
 
-        # Layer 2 -- semantic injection (contrastive)
+        # Layer 2 - semantic injection (contrastive)
         inj = self.injection.max_similarity(vec)
         if inj >= config.INJECTION_SIM_FLOOR and (inj - benign) >= config.INJECTION_MARGIN:
             v = Verdict(False, "semantic_injection",
@@ -145,7 +140,7 @@ class GuardrailEngine:
             self._log(v, text)
             return v
 
-        # Layer 3 -- safety (contrastive)
+        # Layer 3 - safety (contrastive)
         uns = self.unsafe.max_similarity(vec)
         if uns >= config.UNSAFE_SIM_FLOOR and (uns - benign) >= config.UNSAFE_MARGIN:
             v = Verdict(False, "unsafe_input",
@@ -157,7 +152,7 @@ class GuardrailEngine:
             self._log(v, text)
             return v
 
-        # Layer 4 -- contrastive topic classification
+        # Layer 4 - contrastive topic classification
         sim_pos = self.positive.max_similarity(vec)
         sim_neg = self.negative.max_similarity(vec)
         margin_val = sim_pos - sim_neg
@@ -171,8 +166,6 @@ class GuardrailEngine:
 
         clearly_on = (sim_pos >= self.topic.floor
                     and margin_val >= self.topic.margin)
-        # "borderline" = decision margin sits within the ambiguous band of the
-        # threshold, or positive similarity is just under the floor.
         borderline = (abs(margin_val - self.topic.margin) <= self.topic.ambiguous_band
                     or abs(sim_pos - self.topic.floor) <= self.topic.ambiguous_band)
 
@@ -182,7 +175,7 @@ class GuardrailEngine:
             return v
 
         if borderline and self.judge_fn is not None:
-            # Layer 4b -- escalate only genuinely uncertain cases to the LLM.
+            # Layer 4b - escalate only genuinely uncertain cases to the LLM.
             on_topic = self.judge_fn(text, self.topic.name)
             scores["judge"] = "on_topic" if on_topic else "off_topic"
             v = Verdict(on_topic, "topic_judge",
@@ -202,7 +195,7 @@ class GuardrailEngine:
         self._log(v, text)
         return v
 
-    # ---- Public: output pipeline -----------------------------------------
+    # Public: output pipeline
     def check_output(self, text: str) -> Verdict:
         """Layer 5. Validate the model's reply before showing it.
 
@@ -214,7 +207,7 @@ class GuardrailEngine:
           * the model was jailbroken and produced off-topic content;
           * the model leaked its system prompt.
         """
-        # System-prompt leakage: refuse if the reply echoes a chunk of it.
+        # Refuse if the reply echoes a chunk of it
         leaked = _looks_like_leak(text, self.system_prompt)
         if leaked:
             v = Verdict(False, "output_leak",
@@ -244,7 +237,7 @@ class GuardrailEngine:
         self._log(v, "<assistant output>")
         return v
 
-    # ---- helpers ----------------------------------------------------------
+    # helpers
     def _log(self, v: Verdict, text: str) -> None:
         self.logger.log(
             stage=v.stage,

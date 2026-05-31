@@ -19,8 +19,7 @@ from .decision_log import DecisionLogger
 from .embeddings import Embedder
 from .guardrails import GuardrailEngine
 
-# Denials from these stages must NOT have the offending user text written into
-# the conversation history -- we don't feed attack strings back to the model.
+# Not feeding attack strings back to the model.
 _NON_PERSISTED_DENIALS = {
     "regex_injection", "semantic_injection", "unsafe_input", "output_leak",
 }
@@ -46,7 +45,6 @@ def make_judge(key: str):
             result = api_client.chat(messages, key, max_tokens=2, temperature=0)
             return result.content.strip().upper().startswith("Y")
         except api_client.APIError:
-            # Fail closed: if the judge is unavailable, treat as off-topic.
             return False
     return judge
 
@@ -103,8 +101,7 @@ def _handle_command(user_input: str, engine: GuardrailEngine,
             f"last API prompt_tokens={conv.last_prompt_tokens}\n")
         return "handled"
 
-    # /change_topic with no arg -> show the menu.
-    # /change_topic <slug>      -> switch directly.
+    # /change_topic
     parts = text.split()
     if parts[0] == "/change_topic":
         if len(parts) == 1:
@@ -139,12 +136,12 @@ def _handle_command(user_input: str, engine: GuardrailEngine,
 def run() -> None:
     key = api_client.get_api_key()
 
-    # Inversion of control: the Embedder receives a raw embed callable.
+    # The Embedder receives a raw embed callable.
     embedder = Embedder(lambda texts: api_client.embed(texts, key))
     logger = DecisionLogger()
     judge = make_judge(key)
 
-    current_slug = [config.DEFAULT_TOPIC_SLUG]   # mutable holder, see _handle_command
+    current_slug = [config.DEFAULT_TOPIC_SLUG]
     engine = GuardrailEngine(embedder, config.TOPICS[current_slug[0]],
                             logger, judge_fn=judge)
     conv = Conversation(engine.system_prompt)
@@ -168,17 +165,17 @@ def run() -> None:
         if cmd == "handled":
             continue
 
-        # ---- Input guardrails --------------------------------------------
+        # Input guardrails
         v_in = engine.check_input(user_input)
         if not v_in.allowed:
             print(f"Bot: {v_in.refusal}\n")
             if v_in.stage not in _NON_PERSISTED_DENIALS:
-                # Off-topic: keep the exchange coherent for later turns.
+                # Keep the exchange coherent for later turns.
                 conv.add_user(user_input)
                 conv.add_assistant(v_in.refusal)
             continue
 
-        # ---- Model call ---------------------------------------------------
+        # Model call
         conv.add_user(user_input)
         try:
             result = api_client.chat(conv.messages(), key)
@@ -187,7 +184,7 @@ def run() -> None:
             continue
         conv.last_prompt_tokens = result.prompt_tokens
 
-        # ---- Output guardrails -------------------------------------------
+        # Output guardrails
         v_out = engine.check_output(result.content)
         shown = result.content if v_out.allowed else v_out.refusal
         conv.add_assistant(shown)

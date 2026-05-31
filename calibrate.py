@@ -1,19 +1,8 @@
 """
 Threshold calibration tool.
 
-The default thresholds in config.py are *starting points*. ada-002 embeddings
-are anisotropic -- unrelated texts still score fairly high cosine similarity
-(see Ethayarajh, 2019, "How Contextual are Contextualized Word
-Representations?") -- so good thresholds must be measured, not guessed.
-
 Run this against the live API:
-
     python calibrate.py
-
-It prints, for a labelled probe set, the distribution of positive/negative
-similarity and the contrastive margin, then suggests a `floor` and `margin`
-that separate on-topic from off-topic probes. Paste the suggestions into
-config.TOPIC and re-run to confirm.
 """
 
 from __future__ import annotations
@@ -22,7 +11,6 @@ from guardrail_chatbot import api_client, config
 from guardrail_chatbot.embeddings import Embedder
 from guardrail_chatbot.guardrails import AnchorSet
 
-# Held-out probes NOT used as anchors, so this is an honest test.
 ON_TOPIC_PROBES = [
     "Why are the leaves on my basil turning yellow?",
     "Can I grow strawberries in a hanging basket?",

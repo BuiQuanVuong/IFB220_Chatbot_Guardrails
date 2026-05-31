@@ -58,7 +58,6 @@ def _get_encoding():
 
 _ENC = _get_encoding()
 
-# Per-message ChatML overhead used by the GPT-4 family (approximate).
 _PER_MESSAGE_OVERHEAD = 3
 _PRIMING_OVERHEAD = 3
 

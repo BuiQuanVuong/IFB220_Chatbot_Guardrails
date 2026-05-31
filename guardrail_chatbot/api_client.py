@@ -1,15 +1,15 @@
 """
-Thin, well-behaved client for the two Azure AI endpoints.
+Client for the two Azure AI endpoints.
 
-Responsibilities (kept narrow on purpose):
+Responsibilities:
   * attach the api-key header,
   * POST the request, retry on transient errors,
   * surface token usage so the conversation manager can budget context,
-  * raise a clear exception on failure rather than crashing the loop.
+  * raise a exception on failure and not crashing the loop.
 
-Why a dedicated module? It isolates every network detail behind two simple
+The reason for a separate module is that it isolates every network detail behind two simple
 functions (`chat` and `embed`). The guardrail logic never touches `requests`,
-which keeps it unit-testable with mock embeddings (see tests/).
+keeping it OOP principles and easible to do unit test.
 """
 
 from __future__ import annotations
@@ -39,18 +39,14 @@ class ChatResult:
 
 
 def get_api_key() -> str:
-    """Load the API key from the environment / .env, prompting once if absent.
-
-    Mirrors the pattern in the provided example, but never writes the key
-    anywhere unexpected and trims whitespace defensively.
-    """
+    """Load the API key from the environment / .env, prompting once if absent."""
     load_dotenv()
     key = os.getenv("AI_API_KEY")
     if key:
         return key.strip()
 
     print("--- First-time setup: no AI_API_KEY found ---")
-    key = input("Enter your IFB220 AI API key: ").strip()
+    key = input("Enter your AI API key: ").strip()
     if not key:
         print("Error: key cannot be empty.")
         sys.exit(1)

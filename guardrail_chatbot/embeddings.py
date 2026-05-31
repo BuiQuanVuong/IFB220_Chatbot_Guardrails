@@ -1,11 +1,5 @@
 """
 Embedding utilities: cosine similarity, a caching embedder, and anchor sets.
-
-This module is deliberately free of any HTTP code. It depends only on a
-"raw embed" callable of the form ``Callable[[list[str]], list[list[float]]]``.
-In production that callable is ``api_client.embed`` (curried with the key);
-in unit tests it is a deterministic fake. That inversion of control is what
-makes the guardrail logic testable without a live API or an API key.
 """
 
 from __future__ import annotations
