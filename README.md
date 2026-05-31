@@ -5,10 +5,6 @@ topic (gardening by default) and refuses everything else. It does not rely on
 a single protection: it stacks several independent, complementary guardrails
 so that one failing layer does not open the whole door.
 
-> Built for IFB220 Assignment 2. Uses **gpt-4.1-mini** (chat) and
-> **text-embedding-ada-002** (embeddings) via the IFB220 Developer API Portal
-> on Azure AI.
-
 ---
 
 ## 1. Requirements
@@ -27,11 +23,8 @@ pip install -r requirements.txt
 ## 2. How to run
 
 ```bash
-# 1. Provide your key (either copy .env.example -> .env and edit it,
-#    or just run main.py and paste the key when prompted the first time).
-cp .env.example .env        # then edit AI_API_KEY=...
-
-# 2. Run the chatbot
+# Run this in the terminal and it will automatically ask for your API key, 
+# once you entered, it will then be stored in .env
 python main.py
 ```
 
@@ -46,7 +39,7 @@ In-chat commands:
 | `/<topic_name>` | Per-topic shortcut, e.g. `/motor_vehicles`, `/sport` |
 | `/quit` (or `/exit`) | Exit |
 
-The chatbot ships with four predefined topics: **gardening** (default),
+The chatbot has four predefined topics: **gardening** (default),
 **motor_vehicles**, **sport**, and **cinematography**. Switching topic
 *clears the conversation history* on purpose — keeping "we were discussing
 roses" after switching to motor vehicles would both confuse the model and
@@ -55,40 +48,29 @@ the old topic, breaking coherence). Anchor embeddings for each topic are
 computed on first use and cached, so switching back to a topic you've
 already used is free.
 
-To **tune the guardrail thresholds** against the live model (recommended):
-
-```bash
-python calibrate.py
-```
-
-To run the **offline tests** (no API key or network needed):
-
-```bash
-python -m pytest -q
-```
 
 ## 3. How it works (per turn)
 
 ```
 user input
    │
-   ├─► INPUT GUARDRAILS (cheapest checks first)
+   |-> INPUT GUARDRAILS (cheapest checks first)
    │     L1  regex injection pre-filter      (no API call)
    │     L2  embedding injection check       (similarity to attack exemplars)
    │     L3  safety moderation               (similarity to unsafe exemplars)
    │     L4  contrastive topic classifier    (on-topic vs off-topic anchors)
-   │           └─ L4b LLM judge              (only for borderline inputs)
+   │           |-> L4b LLM judge             (only for borderline inputs)
    │
-   ├─ deny ─► polite, logged refusal ─────────────────────────► (next turn)
+   |-> deny -> polite, logged refusal -------------------------> (next turn)
    │
-   └─ allow ─► gpt-4.1-mini chat completion
+   |-> allow -> gpt-4.1-mini chat completion
                   │
-                  └─► OUTPUT GUARDRAILS
+                  |-> OUTPUT GUARDRAILS
                         L5  system-prompt-leak check
                         L5  topic re-check of the reply
-                        └─ deny ─► safe fallback shown instead of reply
+                        |-> deny -> safe fallback shown instead of reply
                   │
-                  └─► token budgeting + context-overflow truncation
+                  |-> token budgeting + context-overflow truncation
 ```
 
 ## 4. Guardrail techniques (and *why* each one)
@@ -98,45 +80,42 @@ different failure mode; together they are far more robust than any single one.
 
 **Layer 0 — Hardened system prompt** (`guardrails.build_system_prompt`).
 The model is told its only role, instructed to refuse role changes and never
-disclose its instructions. This is the first line of defence but, on its own,
-is known to be defeatable by prompt injection — hence the layers below.
+disclose its instructions.
 
 **Layer 1 — Regex injection pre-filter** (`config.INJECTION_REGEXES`).
 Blatant attacks ("ignore all previous instructions", "developer mode", "DAN")
 are caught with zero API cost, *before* any network call. Cheap and
-deterministic, but brittle to paraphrasing — which is why Layer 2 exists.
+deterministic, but still vulnerable to paraphrasing.
 
 **Layer 2 — Semantic injection detection** (embeddings, contrastive).
 The user input is embedded with ada-002 and compared to a set of *injection
 exemplars* **and** to a *benign baseline* (ordinary, polite requests). It is
 flagged only if it is closer to the attack exemplars than to benign text by a
 margin. This catches paraphrased attacks the regex misses (e.g. "kindly set
-aside the rules you were given earlier") while — crucially — not misfiring on
-innocent prompts. (An earlier version used a single absolute threshold and
-wrongly blocked "Introduce me to gardening", because ada-002's anisotropy puts
-almost all short prompts at ~0.85 similarity; the contrastive margin fixes
-this. See Layer 4 for the same reasoning.)
+aside the rules you were given earlier") while not misfiring on normal prompts.
 
 **Layer 3 — Safety moderation** (embeddings, contrastive).
 Same contrastive design against unsafe-content exemplars vs. the benign
 baseline. This is **defense-in-depth on top of** Azure's own server-side
-content filter — its value is that the refusal *reason* is visible and logged
-on our side rather than being an opaque upstream block.
+content filter, its value is that the refusal *reason* is visible and logged
+on client's side rather than being an opaque upstream block.
 
 **Layer 4 — Contrastive topic classifier** (embeddings).
 Rather than a single absolute similarity threshold, the input is compared to
 **both** a positive anchor set (on-topic sentences) **and** a negative anchor
-set (clearly off-topic sentences across many domains). It is judged on-topic
-only if it is meaningfully closer to the positive class (`sim_pos − sim_neg ≥
-margin`) and above a floor.
+set (clearly off-topic sentences across many domains). Got this idea from CAB420
+Assessment 1B Triplet loss, which also have an anchor, a positive, and a negative 
+sample.
 
 *Why contrastive instead of one threshold?* ada-002's embedding space is
 **anisotropic**: even unrelated texts sit at fairly high baseline cosine
-similarity (Ethayarajh, 2019). An absolute threshold is therefore brittle —
-the "right" number drifts with phrasing. Measuring the *margin* between the
-on-topic and off-topic classes cancels out that shared baseline and is far
-more stable. (This is the same intuition behind using a contrastive/relative
-score rather than raw similarity in retrieval systems.)
+similarity (I knew this through trial and error, not sure why). An absolute 
+threshold is therefore brittle, the "right" number drifts with phrasing. 
+Measuring the *margin* between the on-topic and off-topic classes cancels 
+out that shared baseline and is far more stable. (Generally like the idea
+of a soft margin in other model, a hard threshold is very strict, but words
+might varies with different magnitude, using something more flexible is more
+ideal in this case.)
 
 **Layer 4b — LLM-as-judge escalation** (second gpt-4.1-mini call).
 When the contrastive margin is *borderline*, a separate, single-shot
@@ -152,24 +131,34 @@ reply is re-scored for topic drift. So even if an attacker somehow jailbreaks
 the model, the off-topic or leaked output is still blocked and replaced with a
 polite fallback.
 
+**Where did I get all these?**
+I already came up with all these before starting this unit, so it might look like a massive
+work. I get these ideas from my daily use of AI models like Gemini, ChatGPT, etc., I tried figuring out
+why some prompts just got blocked even before sending, or at least it appears to be so, and others got sent 
+but later got blocked while printing the response to my screen. I did some search and people on the internet
+said that they actually have an immeadiate security layer right at the input, and another at the output. 
+So I'm trying to implement that here. I also used some knowledge from IFB104 (for regular expressions, 
+I remembered having that for SQL injection security, so I did the same here), and CAB420 (for the contrastive 
+ideas, this is my first time implementing such thing on literal words and not some arbitrary numbers so it 
+might not be the state of the art, just something I've learnt). The layer 4b is actually me being too carefull, 
+it was added later on for the fear that my earlier fail entirely, its a *just in case* thing.
+
 ## 5. Architecture
 
 ```
 topic_chatbot/
-├── main.py                 # entry point: `python main.py`
-├── calibrate.py            # tune thresholds against the live model
-├── requirements.txt
-├── .env.example
-├── guardrail_chatbot/
-│   ├── config.py           # *** edit this file to change topic/thresholds ***
-│   ├── api_client.py       # Azure chat + embedding calls (auth, retries, usage)
-│   ├── embeddings.py       # cosine, caching Embedder, AnchorSet (pure math)
-│   ├── guardrails.py       # the layered engine (Layers 0–5)
-│   ├── conversation.py     # token counting + context-overflow truncation
-│   ├── decision_log.py     # structured JSONL decision logging
-│   └── chatbot.py          # orchestration / REPL loop
-└── tests/
-    └── test_guardrails.py  # offline tests (deterministic fake embedder)
+|-- main.py                 # entry point: `python main.py`
+|-- calibrate.py            # tune thresholds against the live model
+|-- requirements.txt
+|-- .env
+|-- guardrail_chatbot/
+    |-- config.py           # *** edit this file to change topic/thresholds ***
+    |-- api_client.py       # Azure chat + embedding calls (auth, retries, usage)
+    |-- embeddings.py       # cosine, caching Embedder, AnchorSet (pure math)
+    |-- guardrails.py       # the layered engine (Layers 0–5)
+    |-- conversation.py     # token counting + context-overflow truncation
+    |-- decision_log.py     # structured JSONL decision logging
+    |-- chatbot.py          # orchestration / REPL loop
 ```
 
 Design principles: each module has one responsibility; network code is
@@ -251,39 +240,29 @@ changed (anchors / thresholds) in response. The rubric rewards this evidence.
 - Client-side safety is intentionally light; Azure's filter is the primary
   safety control.
 
-## 11. Use of AI tools  *(complete this section in your own words — see note)*
+## 11. Use of AI tools
 
-> **Academic-integrity note (delete before submitting):** this assignment
-> grades *your* reflection and *your* verification. Fill this section with what
-> *you* actually did. Below is an honest scaffold, not a script to copy.
+- **What AI was used for:** I used Copilot to generate the configuration and test 
+values as it is too exhaustive for me to come up with a bunch of ideas and hand-type 
+all of them. I also used it to aid me in writing the embedding since I have the idea of 
+checking the similarity of the embedded vectors of the chat (the same idea as you see 
+in checking correlation of the variables in machine learning), but I am not confident enough
+to directly apply it into NLP as I haven't done much experiments on that. Another use of AI is 
+in writing the document for the functions and classes, I don't like writing documents, my code is
+self-explanatory but I added documents so that you can have a better understanding of what is done.
 
-- **What AI was used for:** I used an AI coding assistant to help design the
-  layered architecture and generate an initial implementation of the modules,
-  the test suite, and this documentation. _[State which tool, and which parts
-  you wrote/changed yourself.]_
+
 - **How I verified it rather than trusting it blindly:**
-  - Ran `python -m pytest` and confirmed all layers route as intended.
+  - Wrote a `calibrate.py` and run it to record similarity distributions, trying to
+  find the *sweet spot* of it through trial and error.
+  - Wrote test `tests/test_guardrails.py` and run `python -m pytest` to confirm all 
+  layers route as intended.
   - Ran `calibrate.py` and recorded the real ada-002 similarity distributions;
-    set `floor`/`margin` from the measured separation _[insert your numbers]_.
-  - Executed the manual test matrix (§9.2) against the live API and logged the
-    results, including the failures I found and fixed _[describe them]_.
-  - Read each module and confirmed I understand *why* each layer exists and how
-    the contrastive classifier avoids the anisotropy pitfall.
-- **Strengths and limitations I observed:** _[your honest assessment — e.g.
-  where the embedding classifier was over/under-sensitive, whether the judge
-  helped on borderline cases, any prompt that still got through]._
-- **Ethical use:** AI accelerated boilerplate and surfaced the anisotropy
-  consideration I might have missed, but I validated all behaviour empirically
-  and take responsibility for the final code.
-
-## 12. References
-
-- N. Ethayarajh (2019), *How Contextual are Contextualized Word
-  Representations? Comparing the Geometry of BERT, ELMo, and GPT-2
-  Embeddings*, EMNLP. (Anisotropy of embedding spaces — motivates the
-  contrastive classifier over an absolute threshold.)
-- OpenAI, *Embeddings guide* — ada-002 returns 1536-dim vectors; cosine
-  similarity is the recommended comparison.
-- Azure OpenAI Service documentation — chat completions and content filtering.
-- OWASP, *Top 10 for LLM Applications* (LLM01: Prompt Injection) — motivates
-  layered defences and treating injection as a first-class threat.
+  set `floor`/`margin` from the measured separation.
+- **Strengths and limitations I observed:** Feels quite nice to do something like this.
+I tried chatting with it myself trying to find the edge cases where all layers break, and noticed
+that it is quite sensitive to short inputs like "Cool", "?", and commands with typos like "/qiut".
+About strengths, I think this is the most interesting thing I did in the whole unit so I invested all 
+the things I have learnt from the start of the degree into this. I can say that I have done better than I 
+expected.
+- **Ethical use:** 
