@@ -39,7 +39,11 @@ class ChatResult:
 
 
 def get_api_key() -> str:
-    """Load the API key from the environment / .env, prompting once if absent."""
+    """Load the API key from the environment / .env, prompting once if absent.
+
+    Mirrors the pattern in the provided example, but never writes the key
+    anywhere unexpected and trims whitespace defensively.
+    """
     load_dotenv()
     key = os.getenv("AI_API_KEY")
     if key:
@@ -79,7 +83,7 @@ def _post(url: str, key: str, payload: dict) -> dict:
             else:
                 break
     raise APIError(f"request to {url.split('/deployments/')[-1][:30]}... "
-                f"failed after retries: {last_err}")
+                    f"failed after retries: {last_err}")
 
 
 def chat(messages: list[dict], key: str,

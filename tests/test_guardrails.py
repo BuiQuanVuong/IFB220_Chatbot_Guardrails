@@ -185,11 +185,32 @@ def test_output_leak_detected():
 
 
 def test_output_offtopic_blocked(engine_no_judge):
-    sp = "system prompt text"
     v = engine_no_judge.check_output(
-        "The stock market prices and python function sort list today.", sp)
+        "The stock market prices and python function sort list today.")
     assert not v.allowed
     assert v.stage == "output_topic"
+
+
+def test_set_topic_swaps_anchors_and_system_prompt(engine_no_judge):
+    # Engine starts on gardening (from the fixture).
+    assert engine_no_judge.topic.name == "gardening"
+    assert "gardening" in engine_no_judge.system_prompt.lower()
+    starting_pos = engine_no_judge.positive
+
+    # Switch to motor_vehicles.
+    engine_no_judge.set_topic(config.TOPICS["motor_vehicles"])
+    assert engine_no_judge.topic.name == "motor vehicles"
+    assert "motor vehicles" in engine_no_judge.system_prompt.lower()
+    assert engine_no_judge.positive is not starting_pos  # new AnchorSet
+    assert any("engine" in p.lower()
+               for p in engine_no_judge.positive.phrases)
+
+
+def test_topics_catalog_has_all_expected_slugs():
+    for slug in ("gardening", "motor_vehicles", "sport", "cinematography"):
+        assert slug in config.TOPICS
+        t = config.TOPICS[slug]
+        assert t.positive_anchors and t.negative_anchors
 
 
 # --------------------------------------------------------------------------
@@ -199,6 +220,18 @@ def test_token_count_grows_with_text():
     short = [{"role": "user", "content": "hi"}]
     long = [{"role": "user", "content": "word " * 200}]
     assert count_tokens(long) > count_tokens(short)
+
+
+def test_conversation_reset_clears_history_and_swaps_system():
+    conv = Conversation("OLD SYSTEM PROMPT")
+    conv.add_user("hello")
+    conv.add_assistant("hi")
+    conv.last_prompt_tokens = 123
+    conv.reset("NEW SYSTEM PROMPT")
+    msgs = conv.messages()
+    assert msgs[0]["content"] == "NEW SYSTEM PROMPT"
+    assert len(msgs) == 1                # turns wiped
+    assert conv.last_prompt_tokens == 0
 
 
 def test_truncation_preserves_system_and_drops_oldest(monkeypatch):

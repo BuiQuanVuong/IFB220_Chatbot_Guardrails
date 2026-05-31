@@ -77,18 +77,35 @@ class GuardrailEngine:
     def __init__(self, embedder: Embedder, topic: config.TopicConfig,
                 logger, judge_fn: JudgeFn | None = None):
         self.embedder = embedder
-        self.topic = topic
         self.logger = logger
         self.judge_fn = judge_fn
 
-        # Precompute all anchor embeddings once (cached by the Embedder).
-        self.positive = AnchorSet("on_topic", topic.positive_anchors, embedder)
-        self.negative = AnchorSet("off_topic", topic.negative_anchors, embedder)
+        # Topic-independent anchor sets (don't change when topic changes).
         self.injection = AnchorSet("injection", config.INJECTION_EXEMPLARS, embedder)
         self.unsafe = AnchorSet("unsafe", config.UNSAFE_ANCHORS, embedder)
         self.benign = AnchorSet("benign", config.BENIGN_EXEMPLARS, embedder)
-
         self._regexes = [re.compile(p, re.IGNORECASE) for p in config.INJECTION_REGEXES]
+
+        # Topic-dependent state: positive/negative anchors and system prompt.
+        # Set via set_topic so the same code path runs at startup and on
+        # /change_topic at runtime.
+        self.topic: config.TopicConfig
+        self.positive: AnchorSet
+        self.negative: AnchorSet
+        self.system_prompt: str
+        self.set_topic(topic)
+
+    def set_topic(self, topic: config.TopicConfig) -> None:
+        """Switch to a new topic by rebuilding the topic-specific anchors.
+
+        Called once at startup and again whenever the user runs /change_topic.
+        The Embedder caches by text, so switching back to a previously used
+        topic is free (no extra API calls).
+        """
+        self.topic = topic
+        self.positive = AnchorSet("on_topic", topic.positive_anchors, self.embedder)
+        self.negative = AnchorSet("off_topic", topic.negative_anchors, self.embedder)
+        self.system_prompt = build_system_prompt(topic)
 
     # ---- Layer 1: regex injection pre-filter -----------------------------
     def _regex_injection_hit(self, text: str) -> str | None:
@@ -186,15 +203,19 @@ class GuardrailEngine:
         return v
 
     # ---- Public: output pipeline -----------------------------------------
-    def check_output(self, text: str, system_prompt: str) -> Verdict:
+    def check_output(self, text: str) -> Verdict:
         """Layer 5. Validate the model's reply before showing it.
+
+        Uses the engine's current system_prompt for leak detection so the
+        check stays consistent after /change_topic without the caller having
+        to thread the prompt through.
 
         Two failure modes are covered:
           * the model was jailbroken and produced off-topic content;
           * the model leaked its system prompt.
         """
         # System-prompt leakage: refuse if the reply echoes a chunk of it.
-        leaked = _looks_like_leak(text, system_prompt)
+        leaked = _looks_like_leak(text, self.system_prompt)
         if leaked:
             v = Verdict(False, "output_leak",
                         "reply appears to disclose the system prompt", {},

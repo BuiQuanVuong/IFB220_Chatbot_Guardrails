@@ -84,6 +84,19 @@ class Conversation:
     def add_user(self, text: str) -> None:
         self._turns.append({"role": "user", "content": text})
 
+    def reset(self, system_prompt: str) -> None:
+        """Wipe the conversation and install a new system prompt.
+
+        Used on /change_topic. We deliberately drop prior user/assistant
+        turns: keeping "we were discussing roses" after switching to motor
+        vehicles would both confuse the model and undermine the output
+        guardrail (Layer 5 would correctly flag any drift back to the old
+        topic, breaking coherence).
+        """
+        self._system = {"role": "system", "content": system_prompt}
+        self._turns = []
+        self.last_prompt_tokens = 0
+
     def add_assistant(self, text: str) -> None:
         self._turns.append({"role": "assistant", "content": text})
 

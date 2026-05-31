@@ -89,44 +89,159 @@ class TopicConfig:
     ambiguous_band: float = 0.04
 
 
-# === THE ONLY THING YOU EDIT TO CHANGE TOPIC ==============================
-TOPIC = TopicConfig(
-    name="gardening",
-    description=(
-        "home and community gardening: plants, flowers, vegetables, herbs, "
-        "soil, composting, watering, pruning, pests and diseases, garden "
-        "design, tools, seasons, and growing techniques"
+# === Predefined topic catalog =============================================
+# Add or edit topics here -- nothing else in the codebase needs to change.
+# Switching topic at runtime via /change_topic picks one of these by key.
+#
+# DESIGN: each topic's negative_anchors = a shared "generic off-topic" set
+# PLUS a one-line representative prompt from every OTHER topic. This means
+# switching to motor_vehicles doesn't leave car questions in the negative set
+# (which would have been the case with a single hard-coded negatives list),
+# and gives each topic explicit cross-topic rejection.
+
+# Generic off-topic anchors: things that are not any of our supported topics.
+_GENERIC_OFFTOPIC = [
+    "What were the closing prices on the stock market today?",
+    "Can you write a Python function to sort a list?",
+    "Who is going to win the next national election?",
+    "What is the capital city of France?",
+    "Give me a recipe for chocolate chip cookies.",
+    "What are the symptoms and treatment for the flu?",
+    "How do I file my income tax return this year?",
+    "Tell me a joke about lawyers.",
+    "Translate this sentence into Spanish.",
+    "Help me debug this JavaScript error.",
+]
+
+# One short representative prompt per topic, used as a cross-topic negative
+# for the others. Keep these distinctive so the contrastive classifier learns
+# clear inter-topic boundaries.
+_REPRESENTATIVE_PROMPT = {
+    "gardening": "How do I prune my rose bushes in spring?",
+    "motor_vehicles": "What's the best engine oil for a small petrol car?",
+    "sport": "Who won the FIFA World Cup last year?",
+    "cinematography": "How do directors use lighting to create mood in a film?",
+}
+
+
+def _negatives_for(slug: str) -> list[str]:
+    """Generic off-topic anchors plus every OTHER topic's representative."""
+    return _GENERIC_OFFTOPIC + [
+        p for k, p in _REPRESENTATIVE_PROMPT.items() if k != slug
+    ]
+
+
+# Tuning defaults (same starting values for every topic; tune per-topic with
+# calibrate.py and override here if needed).
+_DEFAULT_MARGIN = 0.02
+_DEFAULT_FLOOR = 0.74
+_DEFAULT_AMBIGUOUS_BAND = 0.04
+
+
+TOPICS: dict[str, TopicConfig] = {
+    "gardening": TopicConfig(
+        name="gardening",
+        description=(
+            "home and community gardening: plants, flowers, vegetables, herbs, "
+            "soil, composting, watering, pruning, pests and diseases, garden "
+            "design, tools, seasons, and growing techniques"
+        ),
+        positive_anchors=[
+            "How often should I water my tomato plants in summer?",
+            "What is the best soil mix for growing herbs in pots?",
+            "My roses have black spots on the leaves, how do I treat the disease?",
+            "When is the right time to prune fruit trees?",
+            "How do I start a compost bin for my vegetable garden?",
+            "Which vegetables grow well in a shady backyard?",
+            "What fertiliser should I use for flowering plants?",
+            "How deep should I plant seedlings in raised garden beds?",
+            "How do I get rid of aphids without harmful chemicals?",
+            "What are good companion plants to grow next to basil?",
+        ],
+        negative_anchors=_negatives_for("gardening"),
+        margin=_DEFAULT_MARGIN, floor=_DEFAULT_FLOOR,
+        ambiguous_band=_DEFAULT_AMBIGUOUS_BAND,
     ),
-    positive_anchors=[
-        "How often should I water my tomato plants in summer?",
-        "What is the best soil mix for growing herbs in pots?",
-        "My roses have black spots on the leaves, how do I treat the disease?",
-        "When is the right time to prune fruit trees?",
-        "How do I start a compost bin for my vegetable garden?",
-        "Which vegetables grow well in a shady backyard?",
-        "What fertiliser should I use for flowering plants?",
-        "How deep should I plant seedlings in raised garden beds?",
-        "How do I get rid of aphids without harmful chemicals?",
-        "What are good companion plants to grow next to basil?",
-    ],
-    negative_anchors=[
-        "What were the closing prices on the stock market today?",
-        "Can you write a Python function to sort a list?",
-        "Who is going to win the next national election?",
-        "What is the capital city of France?",
-        "Explain how a car engine's transmission works.",
-        "Give me a recipe for chocolate chip cookies.",
-        "What are the symptoms and treatment for the flu?",
-        "Summarise the plot of a famous science fiction film.",
-        "How do I file my income tax return this year?",
-        "Tell me a joke about lawyers.",
-    ],
-    # Defaults below are STARTING POINTS. They must be tuned against the live
-    # ada-002 model using the calibration script (see README, "Tuning").
-    margin=0.02,
-    floor=0.74,
-    ambiguous_band=0.04,
-)
+
+    "motor_vehicles": TopicConfig(
+        name="motor vehicles",
+        description=(
+            "cars, motorcycles, trucks and other motor vehicles: engines, "
+            "transmissions, maintenance and repair, tyres and brakes, fuel "
+            "and oil, safety features, electric and hybrid vehicles, and "
+            "buying or owning a vehicle"
+        ),
+        positive_anchors=[
+            "What's the best engine oil for a small petrol car?",
+            "How often should I rotate the tyres on my SUV?",
+            "Why is my car making a grinding noise when I brake?",
+            "What's the difference between an automatic and manual transmission?",
+            "How does a turbocharger work in a modern engine?",
+            "When should I replace my car's timing belt?",
+            "Which family sedan has the highest safety rating this year?",
+            "How do I check and top up the brake fluid in my car?",
+            "What does it mean when the check engine light comes on?",
+            "How is an electric vehicle's battery different from a hybrid's?",
+        ],
+        negative_anchors=_negatives_for("motor_vehicles"),
+        margin=_DEFAULT_MARGIN, floor=_DEFAULT_FLOOR,
+        ambiguous_band=_DEFAULT_AMBIGUOUS_BAND,
+    ),
+
+    "sport": TopicConfig(
+        name="sport",
+        description=(
+            "sport in general: team and individual sports, athletes, rules, "
+            "training, competitions, leagues, championships, scores and "
+            "records across football, basketball, cricket, tennis, athletics, "
+            "swimming, motorsport and others"
+        ),
+        positive_anchors=[
+            "Who won the FIFA World Cup last year?",
+            "What's a good training routine to improve sprinting speed?",
+            "Can you explain the offside rule in football?",
+            "How is the NBA salary cap calculated?",
+            "What are the basic rules of cricket for a newcomer?",
+            "Which tennis player has won the most Grand Slam titles?",
+            "How do Olympic swimmers structure their training week?",
+            "What's the difference between rugby league and rugby union?",
+            "How does the points scoring work in Formula 1?",
+            "Who currently holds the world record for the 100 metre sprint?",
+        ],
+        negative_anchors=_negatives_for("sport"),
+        margin=_DEFAULT_MARGIN, floor=_DEFAULT_FLOOR,
+        ambiguous_band=_DEFAULT_AMBIGUOUS_BAND,
+    ),
+
+    "cinematography": TopicConfig(
+        name="cinematography",
+        description=(
+            "the art and craft of filmmaking: camera work, shots and framing, "
+            "lighting, lenses, composition, colour, directors of photography, "
+            "famous films and cinematographers, and visual storytelling "
+            "techniques"
+        ),
+        positive_anchors=[
+            "What's the difference between a wide shot and an establishing shot?",
+            "How do directors use lighting to create mood in a film?",
+            "Can you explain the rule of thirds in framing a scene?",
+            "What does a director of photography do on a film set?",
+            "How was the bullet-time effect achieved in The Matrix?",
+            "Which camera lenses are commonly used for close-up shots in cinema?",
+            "What is colour grading and why does it matter in post-production?",
+            "How do filmmakers shoot a dolly zoom for emotional effect?",
+            "What aspect ratio is typical for modern feature films?",
+            "Who are considered some of the greatest cinematographers of all time?",
+        ],
+        negative_anchors=_negatives_for("cinematography"),
+        margin=_DEFAULT_MARGIN, floor=_DEFAULT_FLOOR,
+        ambiguous_band=_DEFAULT_AMBIGUOUS_BAND,
+    ),
+}
+
+DEFAULT_TOPIC_SLUG = "gardening"
+# Back-compat alias: existing code (and calibrate.py, tests) reference TOPIC.
+TOPIC = TOPICS[DEFAULT_TOPIC_SLUG]
 # ==========================================================================
 
 

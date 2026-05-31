@@ -1,4 +1,4 @@
-# IFB220_Chatbot_Guardrails
+# Topic-Constrained Chatbot with Layered AI Guardrails
 
 A multi-turn command-line chatbot that will **only** discuss one configured
 topic (gardening by default) and refuses everything else. It does not rely on
@@ -35,8 +35,25 @@ cp .env.example .env        # then edit AI_API_KEY=...
 python main.py
 ```
 
-In-chat commands: `/help`, `/tokens` (show the current context-token estimate),
-`/quit`.
+In-chat commands:
+
+| Command | What it does |
+|---------|--------------|
+| `/help` | Show all commands |
+| `/tokens` | Show the current prompt-token estimate vs. budget |
+| `/change_topic` | List the available topics (current marked with `*`) |
+| `/change_topic <name>` | Switch directly, e.g. `/change_topic sport` |
+| `/<topic_name>` | Per-topic shortcut, e.g. `/motor_vehicles`, `/sport` |
+| `/quit` (or `/exit`) | Exit |
+
+The chatbot ships with four predefined topics: **gardening** (default),
+**motor_vehicles**, **sport**, and **cinematography**. Switching topic
+*clears the conversation history* on purpose — keeping "we were discussing
+roses" after switching to motor vehicles would both confuse the model and
+weaken Layer 5 (the output guardrail would correctly flag any drift back to
+the old topic, breaking coherence). Anchor embeddings for each topic are
+computed on first use and cached, so switching back to a topic you've
+already used is free.
 
 To **tune the guardrail thresholds** against the live model (recommended):
 
@@ -162,12 +179,17 @@ function) so tests inject a deterministic fake.
 
 ## 6. Changing the topic
 
-Edit **only** `config.py` → the `TOPIC` object: set `name`, `description`,
-`positive_anchors`, and `negative_anchors`. No other file needs to change.
-For example, to switch to motor vehicles, replace the anchors with
-vehicle questions ("How do I change my car's oil?", …) and off-topic anchors
-(which can stay largely the same). Re-run `calibrate.py` to retune `floor`
-and `margin` for the new topic.
+**At runtime (no code edits):** use `/change_topic` to see the menu and pick
+one of the predefined topics, or `/sport` etc. as a shortcut.
+
+**Adding or editing a topic in code:** edit *only* the `TOPICS` dict in
+`config.py`. Each entry is a `TopicConfig` with `name`, `description`,
+`positive_anchors`, and `negative_anchors`. Negative anchors for each topic
+are built automatically from a shared generic-off-topic list **plus** the
+other topics' representative prompts, so the contrastive classifier already
+learns inter-topic boundaries without you having to duplicate that work. After
+changing a topic, re-run `calibrate.py` to retune `floor` and `margin` if its
+defaults don't fit.
 
 ## 7. Token monitoring & context overflow
 
