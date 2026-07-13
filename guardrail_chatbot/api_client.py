@@ -3,13 +3,13 @@ Client for the two Azure AI endpoints.
 
 Responsibilities:
   * attach the api-key header,
-  * POST the request, retry on transient errors,
+  * POST the request, retrying on transient errors,
   * surface token usage so the conversation manager can budget context,
-  * raise a exception on failure and not crashing the loop.
+  * raise an exception on failure rather than crashing the loop.
 
-The reason for a separate module is that it isolates every network detail behind two simple
-functions (`chat` and `embed`). The guardrail logic never touches `requests`,
-keeping it OOP principles and easible to do unit test.
+Keeping this in a separate module isolates every network detail behind two
+simple functions (`chat` and `embed`). The guardrail logic never touches
+`requests`, which keeps the layers decoupled and easy to unit test offline.
 """
 
 from __future__ import annotations

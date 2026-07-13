@@ -15,3 +15,6 @@ env/
 
 # Local environment variables
 .env
+
+# Runtime decision log (regenerated on each run)
+decisions.jsonl
